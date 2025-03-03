@@ -1,8 +1,8 @@
-# streamlit==1.42.2
-# torch==2.1.0+cpu
-# transformers==4.49.0
-# sentence-transformers==3.4.1
-# pinecone==3.0.0
+streamlit==1.42.2
+torch==2.1.0+cpu
+transformers==4.49.0
+sentence-transformers==3.4.1
+pinecone==3.0.0
 boto3
 s3fs
 beautifulsoup4
