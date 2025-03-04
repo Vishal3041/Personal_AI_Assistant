@@ -3,6 +3,7 @@ torch
 transformers
 sentence-transformers
 pinecone
+einops
 boto3
 s3fs
 beautifulsoup4
