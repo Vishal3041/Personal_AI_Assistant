@@ -6,10 +6,13 @@ from sentence_transformers import SentenceTransformer
 import os
 import re
 
+# ✅ Set Streamlit page config (MUST be first)
+st.set_page_config(page_title="Personal AI Assistant", layout="wide")
+
 # ✅ Disable Torch Compilation for compatibility
 os.environ["TORCH_COMPILE_DISABLE"] = "1"
 
-# ✅ Initialize Pinecone with the correct API key
+# ✅ Initialize Pinecone
 pc = Pinecone(api_key="pcsk_6awTRp_rSsr7eom3bSZXZZcnDLDwc87RnpU2Sp9WEzyEFdEj2TtiyRwjEfnaXswVjGqLi")
 
 # ✅ Define Indexes
@@ -31,27 +34,28 @@ if index_name not in existing_indexes:
 # ✅ Access the Pinecone index
 index = pc.Index(index_name)
 
-# ✅ Load Sentence Transformer for correct embedding size (384)
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# ✅ Model Paths (Hugging Face Models Instead of Local Paths)
+# ✅ Hugging Face Model Paths
 YOUTUBE_MODEL_PATH = "Vishal3041/falcon_finetuned_llm"
 CHROME_MODEL_PATH = "Vishal3041/TransNormerLLM_finetuned"
 
-# ✅ Load Model with CPU Support
+# ✅ Load Sentence Transformer for correct embedding size (384)
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# ✅ Load Model from Hugging Face
 def load_model(model_path):
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path, 
-            trust_remote_code=True,
-            device_map="auto"  # ✅ Automatically assigns the best device (CPU/GPU)
-        )
+        model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-        return model, tokenizer
+        # ✅ Move model to CPU (or GPU if available)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.to(device)
+
+        print("✅ Model and tokenizer loaded successfully!")  # Debugging
+        return model, tokenizer, device
     except Exception as e:
         st.error(f"⚠️ Error loading model: {e}")
-        return None, None
+        return None, None, None
 
 # ✅ Load the Model **Once** to Reduce Latency
 model_path = YOUTUBE_MODEL_PATH if selected_app == "YouTube" else CHROME_MODEL_PATH
@@ -62,11 +66,13 @@ model = st.session_state["model"]
 tokenizer = st.session_state["tokenizer"]
 device = st.session_state["device"]
 
+# ✅ Debugging: Ensure tokenizer is loaded inside Streamlit
 if tokenizer is None:
     st.error("❌ Tokenizer not loaded properly. Check the model path and structure!")
 
 st.title("🔍 Personal AI Assistant")
 st.subheader("Chat with your YouTube or Chrome history!")
+
 st.markdown("### 💬 Ask a question based on your history")
 
 # ✅ Store Chat History in Streamlit Session
@@ -83,14 +89,17 @@ user_query = st.text_input("Type your question...")
 
 # ✅ Query and Context Retrieval
 def perform_filtered_query(query, filter_conditions=None, query_vector=None):
+    """
+    Perform a Pinecone query with combined filters and augment the result.
+    """
     if filter_conditions is None:
         filter_conditions = {}
 
-    # ✅ Use embeddings for title-based search
+    # ✅ Ensure query_vector matches Pinecone index dimension (384)
     if query_vector is None:
-        query_vector = embedding_model.encode(query).tolist()
+        query_vector = [0.0] * 384  # Dummy vector for metadata-only filtering
 
-    # ✅ Use keyword arguments for Pinecone query
+    # ✅ Query Pinecone with combined filters
     results = index.query(vector=query_vector, top_k=5, include_metadata=True, filter=filter_conditions)
 
     # ✅ Construct formatted context for UI
@@ -100,8 +109,11 @@ def perform_filtered_query(query, filter_conditions=None, query_vector=None):
         title = metadata.get("Title", "No Title")
         timestamp = metadata.get("Timestamp", "No Date")
 
+        # ✅ Chrome results formatting
         if selected_app == "Chrome":
             formatted_entry = f"📌 **{title}**\n   🕒 *Visited on: {timestamp}*"
+        
+        # ✅ YouTube results formatting
         else:
             watched_at = metadata.get("Watched At", "Unknown Date")
             video_link = metadata.get("Video Link", "#")
@@ -109,12 +121,16 @@ def perform_filtered_query(query, filter_conditions=None, query_vector=None):
 
         context_list.append(formatted_entry)
 
-    return "\n\n".join(context_list) if context_list else "No relevant results found."
+    # ✅ Join context entries neatly
+    context = "\n\n".join(context_list) if context_list else "No relevant results found."
+    
+    # ✅ Limit context length to avoid exceeding model input size
+    return context[:500]
 
 # ✅ Detect Query Type and Extract Filters
 def perform_rag_query(query):
     filter_conditions = {}
-    query_vector = embedding_model.encode(query).tolist()
+    query_vector = None
 
     # ✅ Detect date in query
     date_match = re.search(r'\b(\d{4}-\d{2}-\d{2})\b', query, re.IGNORECASE)
@@ -131,6 +147,10 @@ def perform_rag_query(query):
     for category in categories:
         if category.lower() in query.lower() and selected_app == "YouTube":
             filter_conditions["Category"] = category
+
+    # ✅ Use embeddings for title-based search
+    if not filter_conditions or "title" in query.lower():
+        query_vector = embedding_model.encode(query).tolist()
 
     return perform_filtered_query(query, filter_conditions=filter_conditions, query_vector=query_vector)
 
@@ -151,7 +171,7 @@ if st.button("Ask"):
 
         try:
             input_ids = tokenizer.encode(input_text, return_tensors="pt").to(device)
-            output = model.generate(input_ids, max_length=512, do_sample=True, top_p=0.9, temperature=0.7)
+            output = model.generate(input_ids, max_new_tokens=512, do_sample=True, top_p=0.9, temperature=0.7)  # ✅ Fix applied here
             response = tokenizer.decode(output[0], skip_special_tokens=True)
         except Exception as e:
             st.error(f"⚠️ Error generating response: {e}")
