@@ -41,14 +41,17 @@ CHROME_MODEL_PATH = "Vishal3041/TransNormerLLM_finetuned"
 # ✅ Load Model with CPU Support
 def load_model(model_path):
     try:
-        model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path, 
+            trust_remote_code=True,
+            device_map="auto"  # ✅ Automatically assigns the best device (CPU/GPU)
+        )
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model.to(device)
-        return model, tokenizer, device
+
+        return model, tokenizer
     except Exception as e:
         st.error(f"⚠️ Error loading model: {e}")
-        return None, None, None
+        return None, None
 
 # ✅ Load the Model **Once** to Reduce Latency
 model_path = YOUTUBE_MODEL_PATH if selected_app == "YouTube" else CHROME_MODEL_PATH
