@@ -11,7 +11,7 @@ os.environ["TORCH_COMPILE_DISABLE"] = "1"
 # ✅ Initialize Pinecone
 pc = Pinecone(api_key="85e39b43-9316-4d8b-b684-eb46542c34ef", environment="us-east-1")
 
-# ✅ Define Hugging Face Model Paths (Replace S3 with HF Model IDs)
+# ✅ Define Hugging Face Model Paths
 HF_MODELS = {
     "YouTube": "Vishal3041/falcon_finetuned_llm",
     "Chrome": "Vishal3041/TransNormerLLM_finetuned"
@@ -26,8 +26,10 @@ INDEXES = {
 # ✅ Load models and tokenizers properly from Hugging Face
 def load_model(model_id):
     try:
-        model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, trust_remote_code=True, revision="main"
+        )
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
         return model, tokenizer
     except Exception as e:
         st.error(f"⚠️ Error loading model: {e}")
