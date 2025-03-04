@@ -5,9 +5,13 @@ from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
 import os
 import re
+import asyncio
 
 # ✅ Set Streamlit page config (MUST be first)
 st.set_page_config(page_title="Personal AI Assistant", layout="wide")
+
+# ✅ Fix "0 active drivers" issue
+torch.set_num_threads(1)
 
 # ✅ Disable Torch Compilation for compatibility
 os.environ["TORCH_COMPILE_DISABLE"] = "1"
