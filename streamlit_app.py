@@ -1,74 +1,72 @@
 import streamlit as st
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import pinecone
 from pinecone import Pinecone
+from sentence_transformers import SentenceTransformer
 import os
+import re
 
-# ✅ Disable Torch Compilation for Compatibility
+# ✅ Disable Torch Compilation for compatibility
 os.environ["TORCH_COMPILE_DISABLE"] = "1"
 
-# ✅ Initialize Pinecone
-pc = Pinecone(api_key="85e39b43-9316-4d8b-b684-eb46542c34ef", environment="us-east-1")
+# ✅ Initialize Pinecone with the correct API key
+pc = Pinecone(api_key="your_pinecone_api_key")
 
-# ✅ Define Hugging Face Model Paths
-HF_MODELS = {
-    "YouTube": "Vishal3041/falcon_finetuned_llm",
-    "Chrome": "Vishal3041/TransNormerLLM_finetuned"
-}
-
-# ✅ Define Pinecone Indexes
+# ✅ Define Indexes
 INDEXES = {
-    "YouTube": "youtube-data-index",
-    "Chrome": "chrome-history-index"
+    "Chrome": "chrome-history-index",
+    "YouTube": "youtube-data-index"
 }
 
-# ✅ Load models and tokenizers properly from Hugging Face
-def load_model(model_id):
+# ✅ Ensure the index exists before querying
+selected_app = st.selectbox("Choose the application:", ["Chrome", "YouTube"])
+index_name = INDEXES[selected_app]
+
+# ✅ Check if the index exists in Pinecone
+existing_indexes = pc.list_indexes().names()
+if index_name not in existing_indexes:
+    st.error(f"⚠️ Index '{index_name}' does not exist in Pinecone. Please verify or create it.")
+    st.stop()
+
+# ✅ Access the Pinecone index
+index = pc.Index(index_name)
+
+# ✅ Load Sentence Transformer for correct embedding size (384)
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# ✅ Model Paths (Hugging Face Models Instead of Local Paths)
+YOUTUBE_MODEL_PATH = "Vishal3041/falcon_finetuned_llm"
+CHROME_MODEL_PATH = "Vishal3041/TransNormerLLM_finetuned"
+
+# ✅ Load Model with CPU Support
+def load_model(model_path):
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id, trust_remote_code=True, revision="main"
-        )
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-        return model, tokenizer
+        model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.to(device)
+        return model, tokenizer, device
     except Exception as e:
         st.error(f"⚠️ Error loading model: {e}")
-        return None, None
+        return None, None, None
 
-# ✅ Streamlit UI Setup
-st.set_page_config(page_title="Personal AI Assistant", layout="wide")
+# ✅ Load the Model **Once** to Reduce Latency
+model_path = YOUTUBE_MODEL_PATH if selected_app == "YouTube" else CHROME_MODEL_PATH
+if "model" not in st.session_state:
+    st.session_state["model"], st.session_state["tokenizer"], st.session_state["device"] = load_model(model_path)
 
-# ✅ Custom CSS for Better UI
-st.markdown(
-    """
-    <style>
-    .stChatMessage { background-color: #f0f2f6; padding: 15px; border-radius: 10px; }
-    .css-1d391kg { background-color: #f8f9fa !important; }
-    </style>
-    """, unsafe_allow_html=True
-)
+model = st.session_state["model"]
+tokenizer = st.session_state["tokenizer"]
+device = st.session_state["device"]
+
+if tokenizer is None:
+    st.error("❌ Tokenizer not loaded properly. Check the model path and structure!")
 
 st.title("🔍 Personal AI Assistant")
 st.subheader("Chat with your YouTube or Chrome history!")
-
-# ✅ Dropdown Menu for App Selection
-selected_app = st.selectbox("Choose the application:", ["YouTube", "Chrome"])
-
-# ✅ Load the Correct Model from Hugging Face
-model_id = HF_MODELS[selected_app]
-model, tokenizer = load_model(model_id)
-
-if model is None or tokenizer is None:
-    st.error("⚠️ Failed to load the model from Hugging Face. Check model repo & structure.")
-    st.stop()
-
-# ✅ Load Pinecone Index
-index_name = INDEXES[selected_app]
-index = pc.Index(index_name)
-
 st.markdown("### 💬 Ask a question based on your history")
 
-# ✅ Store chat history in Streamlit session
+# ✅ Store Chat History in Streamlit Session
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -80,36 +78,83 @@ for message in st.session_state.messages:
 # ✅ User Query Input
 user_query = st.text_input("Type your question...")
 
+# ✅ Query and Context Retrieval
+def perform_filtered_query(query, filter_conditions=None, query_vector=None):
+    if filter_conditions is None:
+        filter_conditions = {}
+
+    # ✅ Use embeddings for title-based search
+    if query_vector is None:
+        query_vector = embedding_model.encode(query).tolist()
+
+    # ✅ Use keyword arguments for Pinecone query
+    results = index.query(vector=query_vector, top_k=5, include_metadata=True, filter=filter_conditions)
+
+    # ✅ Construct formatted context for UI
+    context_list = []
+    for res in results.get("matches", []):
+        metadata = res.get("metadata", {})
+        title = metadata.get("Title", "No Title")
+        timestamp = metadata.get("Timestamp", "No Date")
+
+        if selected_app == "Chrome":
+            formatted_entry = f"📌 **{title}**\n   🕒 *Visited on: {timestamp}*"
+        else:
+            watched_at = metadata.get("Watched At", "Unknown Date")
+            video_link = metadata.get("Video Link", "#")
+            formatted_entry = f"🎬 **[{title}]({video_link})**\n   📅 *Watched on: {watched_at}*"
+
+        context_list.append(formatted_entry)
+
+    return "\n\n".join(context_list) if context_list else "No relevant results found."
+
+# ✅ Detect Query Type and Extract Filters
+def perform_rag_query(query):
+    filter_conditions = {}
+    query_vector = embedding_model.encode(query).tolist()
+
+    # ✅ Detect date in query
+    date_match = re.search(r'\b(\d{4}-\d{2}-\d{2})\b', query, re.IGNORECASE)
+    if date_match:
+        filter_conditions["Timestamp"] = date_match.group(1)
+
+    # ✅ Detect domain in query (Chrome)
+    domain_match = re.search(r'\b(?:www\.)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b', query, re.IGNORECASE)
+    if domain_match and selected_app == "Chrome":
+        filter_conditions["Domain"] = domain_match.group(1)
+
+    # ✅ Detect category in query (YouTube)
+    categories = ["Science & Technology", "Education", "News & Politics", "Autos & Vehicles"]
+    for category in categories:
+        if category.lower() in query.lower() and selected_app == "YouTube":
+            filter_conditions["Category"] = category
+
+    return perform_filtered_query(query, filter_conditions=filter_conditions, query_vector=query_vector)
+
+# ✅ Handling User Query
 if st.button("Ask"):
     if user_query:
-        # Store user query
         st.session_state.messages.append({"role": "user", "content": user_query})
 
-        # ✅ RAG Pipeline: Fetch relevant context
+        # ✅ Retrieve context from Pinecone
         try:
-            # ✅ FIX: Ensure query embedding has the correct dimension (384)
-            query_embedding = embedding_model.encode(user_query).tolist()
-
-            # ✅ FIX: Use explicit keyword arguments for Pinecone query
-            results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
-
-            context = "\n".join([doc["metadata"]["text"] for doc in results["matches"]])
+            context = perform_rag_query(user_query)
         except Exception as e:
             st.error(f"⚠️ Error fetching context from Pinecone: {e}")
             st.stop()
 
-        # ✅ Generate Response from LLM
-        input_text = f"Context: {context}\nUser Question: {user_query}\nAnswer:"
-        input_ids = tokenizer.encode(input_text, return_tensors="pt")
+        # ✅ Generate Response Using Model
+        input_text = f"### 🔍 **Search Results for:** \"{user_query}\"\n\n{context}\n\n💡 **Answer:**"
 
         try:
+            input_ids = tokenizer.encode(input_text, return_tensors="pt").to(device)
             output = model.generate(input_ids, max_length=512, do_sample=True, top_p=0.9, temperature=0.7)
             response = tokenizer.decode(output[0], skip_special_tokens=True)
         except Exception as e:
             st.error(f"⚠️ Error generating response: {e}")
             st.stop()
 
-        # ✅ Store & Display Response
+        # ✅ Store & Display Response (Formatted)
         st.session_state.messages.append({"role": "assistant", "content": response})
         with st.chat_message("assistant"):
-            st.markdown(response)
+            st.markdown(f"{input_text} {response}", unsafe_allow_html=True)
