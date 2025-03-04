@@ -10,7 +10,7 @@ import re
 os.environ["TORCH_COMPILE_DISABLE"] = "1"
 
 # ✅ Initialize Pinecone with the correct API key
-pc = Pinecone(api_key="your_pinecone_api_key")
+pc = Pinecone(api_key="pcsk_6awTRp_rSsr7eom3bSZXZZcnDLDwc87RnpU2Sp9WEzyEFdEj2TtiyRwjEfnaXswVjGqLi")
 
 # ✅ Define Indexes
 INDEXES = {
