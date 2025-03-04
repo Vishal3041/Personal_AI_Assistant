@@ -85,12 +85,13 @@ if st.button("Ask"):
         # Store user query
         st.session_state.messages.append({"role": "user", "content": user_query})
 
-        # ✅ RAG Pipeline: Fetch relevant context from Pinecone
+        # ✅ RAG Pipeline: Fetch relevant context
         try:
-            query_embedding = model.get_input_embeddings()(torch.tensor(tokenizer.encode(user_query)).unsqueeze(0))
+            # ✅ FIX: Ensure query embedding has the correct dimension (384)
+            query_embedding = embedding_model.encode(user_query).tolist()
 
-            # ✅ FIX: Use explicit keyword arguments in Pinecone query
-            results = index.query(vector=query_embedding.tolist(), top_k=5, include_metadata=True)
+            # ✅ FIX: Use explicit keyword arguments for Pinecone query
+            results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
 
             context = "\n".join([doc["metadata"]["text"] for doc in results["matches"]])
         except Exception as e:
