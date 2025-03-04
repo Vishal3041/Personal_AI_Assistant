@@ -88,7 +88,10 @@ if st.button("Ask"):
         # ✅ RAG Pipeline: Fetch relevant context from Pinecone
         try:
             query_embedding = model.get_input_embeddings()(torch.tensor(tokenizer.encode(user_query)).unsqueeze(0))
-            results = index.query(query_embedding.tolist(), top_k=5, include_metadata=True)
+
+            # ✅ FIX: Use explicit keyword arguments in Pinecone query
+            results = index.query(vector=query_embedding.tolist(), top_k=5, include_metadata=True)
+
             context = "\n".join([doc["metadata"]["text"] for doc in results["matches"]])
         except Exception as e:
             st.error(f"⚠️ Error fetching context from Pinecone: {e}")
