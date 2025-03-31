@@ -3,13 +3,40 @@ import boto3
 import os
 import json
 import sys
-# instantiate a client
-s3 = boto3.client(
+
+# Get AWS credentials from environment variables or Streamlit secrets
+def get_aws_credentials():
+    try:
+        # First try to get from Streamlit secrets (for Streamlit Cloud)
+        aws_access_key_id = st.secrets["aws"]["aws_access_key_id"]
+        aws_secret_access_key = st.secrets["aws"]["aws_secret_access_key"]
+        region_name = st.secrets["aws"]["region_name"]
+    except:
+        # Fallback to environment variables (for local development)
+        aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+        aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        region_name = os.getenv("AWS_REGION", "us-east-2")
+
+    if not all([aws_access_key_id, aws_secret_access_key]):
+        st.error("AWS credentials not found. Please set them in environment variables or Streamlit secrets.")
+        return None
+
+    return {
+        "aws_access_key_id": aws_access_key_id,
+        "aws_secret_access_key": aws_secret_access_key,
+        "region_name": region_name
+    }
+
+# Initialize S3 client with credentials
+credentials = get_aws_credentials()
+if credentials:
+    s3 = boto3.client(
         service_name='s3',
-        region_name='us-east-2',
-        aws_access_key_id='AKIAYS2NWIABPANVN3H5',
-        aws_secret_access_key='2IvszGuqMOQbL4FAp/Slek4nNkiwiXRj0OEd/eO0'
-)
+        **credentials
+    )
+else:
+    st.error("Failed to initialize AWS client. Please check your credentials.")
+    st.stop()
 
 # lambda_client = boto3.client(
 #     service_name='lambda',

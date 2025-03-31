@@ -16,8 +16,28 @@ torch.set_num_threads(1)
 # ✅ Disable Torch Compilation for compatibility
 os.environ["TORCH_COMPILE_DISABLE"] = "1"
 
-# ✅ Initialize Pinecone
-pc = Pinecone(api_key="pcsk_6awTRp_rSsr7eom3bSZXZZcnDLDwc87RnpU2Sp9WEzyEFdEj2TtiyRwjEfnaXswVjGqLi")
+# ✅ Get Pinecone API key from environment variables or Streamlit secrets
+def get_pinecone_credentials():
+    try:
+        # First try to get from Streamlit secrets (for Streamlit Cloud)
+        pinecone_api_key = st.secrets["pinecone"]["api_key"]
+    except:
+        # Fallback to environment variables (for local development)
+        pinecone_api_key = os.getenv("PINECONE_API_KEY")
+
+    if not pinecone_api_key:
+        st.error("Pinecone API key not found. Please set it in environment variables or Streamlit secrets.")
+        return None
+
+    return pinecone_api_key
+
+# ✅ Initialize Pinecone with credentials
+pinecone_api_key = get_pinecone_credentials()
+if pinecone_api_key:
+    pc = Pinecone(api_key=pinecone_api_key)
+else:
+    st.error("Failed to initialize Pinecone client. Please check your credentials.")
+    st.stop()
 
 # ✅ Define Indexes
 INDEXES = {
